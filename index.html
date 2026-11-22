@@ -21,14 +21,30 @@
 const canvas=document.querySelector('#game'),ctx=canvas.getContext('2d');
 let W=innerWidth,H=innerHeight,DPR=1;
 function resize(){DPR=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;canvas.width=Math.round(W*DPR);canvas.height=Math.round(H*DPR);ctx.setTransform(DPR,0,0,DPR,0,0)}addEventListener('resize',resize);resize();
-const keys=new Set();let state='menu',last=0,world=0,cam=0,speed=345,vy=0,py=0,angle=0,spin=0,air=false,crashTimer=0,score=0,best=Number(localStorage.getItem('fernlineBest')||0),landings=0,combo=0,toast='',toastTime=0,mute=false,audio=null,suspension=0,suspensionVel=0,bumpTime=0,leanPose=0;
+const keys=new Set();let state='menu',last=0,world=0,cam=0,speed=345,vy=0,py=0,angle=0,spin=0,air=false,crashTimer=0,score=0,best=Number(localStorage.getItem('fernlineBest')||0),landings=0,combo=0,toast='',toastTime=0,mute=false,audio=null,suspension=0,suspensionVel=0,frontSuspension=0,rearSuspension=0,frontSuspensionVel=0,rearSuspensionVel=0,bumpTime=0,leanPose=0;
 const rocks=Array.from({length:220},(_,i)=>({x:285+i*113+rand(i+40)*66,size:4+rand(i+90)*7,seed:i}));
 const groundY=()=>Math.min(H*.76,Math.max(H*.61,480));
 function rand(n){const x=Math.sin(n*127.1+311.7)*43758.5453;return x-Math.floor(x)}
 function gapInfo(i){const start=500+i*700;return {start,width:150+rand(i+5)*65,lip: start, end:start+150+rand(i+5)*65}}
-function terrain(x){let y=groundY()+Math.sin(x*.004)*10+Math.sin(x*.013)*4;const idx=Math.max(0,Math.floor((x-500)/700));for(let i=Math.max(0,idx-1);i<=idx+1;i++){const g=gapInfo(i),pre=g.start-105,post=g.end+105;if(x>=pre&&x<g.start){const t=(x-pre)/(g.start-pre);y=groundY()-82*t;}else if(x>=g.start&&x<=g.end)return null;else if(x>g.end&&x<post){const t=(x-g.end)/(post-g.end);y=groundY()-64*(1-t);}}return y}
+function bigJumpCenter(i){let center=1700+i*2600+rand(i+31)*900;for(let n=Math.max(0,Math.floor((center-500)/700)-1);n<=Math.floor((center-500)/700)+1;n++){const gap=gapInfo(n);if(center>gap.start-175&&center<gap.end+175)center=gap.end+230}return center}
+function terrain(x){
+  const base=groundY()+(x-world)*.018;
+  let y=base+Math.sin(x*.0032)*12+Math.sin(x*.009)*5;
+  const idx=Math.max(0,Math.floor((x-500)/700));
+  for(let i=Math.max(0,idx-1);i<=idx+1;i++){
+    const g=gapInfo(i),pre=g.start-105,post=g.end+105;
+    if(x>=pre&&x<g.start){const t=(x-pre)/(g.start-pre);y=base-82*t-22*Math.sin(t*Math.PI);}
+    else if(x>=g.start&&x<=g.end)return null;
+    else if(x>g.end&&x<post){const t=(x-g.end)/(post-g.end);y=base-64*(1-t)-18*Math.sin(t*Math.PI);}
+  }
+  const jumpIndex=Math.floor((x-1700)/2600);
+  if(jumpIndex>=0){const center=bigJumpCenter(jumpIndex),dist=x-center;
+    if(Math.abs(dist)<150){const t=1-Math.abs(dist)/150;y-=Math.pow(t,2)*95;}
+  }
+  return y;
+}
 function rockAt(x){const i=Math.round((x-285)/113);if(i<0||i>=rocks.length)return null;const rock=rocks[i];return Math.abs(rock.x-x)<rock.size+20?rock:null}
-function start(){state='play';world=90;cam=0;speed=365;vy=0;py=groundY()-13;angle=0;spin=0;air=false;score=0;landings=0;combo=0;crashTimer=0;suspension=0;suspensionVel=0;bumpTime=0;leanPose=0;last=performance.now();playSound(440,.08);}
+function start(){state='play';world=90;cam=0;speed=365;vy=0;py=groundY()-13;angle=0;spin=0;air=false;score=0;landings=0;combo=0;crashTimer=0;suspension=0;suspensionVel=0;frontSuspension=0;rearSuspension=0;frontSuspensionVel=0;rearSuspensionVel=0;bumpTime=0;leanPose=0;last=performance.now();playSound(440,.08);}
 function playSound(f,d=.1){if(mute)return;try{audio??=new AudioContext();const o=audio.createOscillator(),g=audio.createGain();o.frequency.value=f;o.type='sine';g.gain.setValueAtTime(.055,audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+d);o.connect(g);g.connect(audio.destination);o.start();o.stop(audio.currentTime+d)}catch{}}
 function crash(){if(state!=='play')return;state='crash';crashTimer=0;combo=0;playSound(115,.3)}
 function activate(){if(state==='menu'||state==='over')start();else if(state==='paused')state='play'}
@@ -38,18 +54,34 @@ for(const b of document.querySelectorAll('[data-key]')){const k=b.dataset.key;b.
 document.querySelector('#sound').onclick=()=>{mute=!mute;document.querySelector('#sound').textContent=mute?'∅':'♪'};
 canvas.addEventListener('pointerdown',e=>{if(state!=='play'){activate();return}if(e.clientY>H*.68)keys.add('Space')});canvas.addEventListener('pointerup',()=>keys.delete('Space'));
 function update(dt){if(state==='crash'){crashTimer+=dt;if(crashTimer>1.3){state='over';if(score>best){best=score;localStorage.setItem('fernlineBest',String(best))}}return}if(state!=='play')return;
- const left=keys.has('ArrowLeft')||keys.has('a'),right=keys.has('ArrowRight')||keys.has('d'),forward=keys.has('ArrowUp')||keys.has('w'),back=keys.has('ArrowDown')||keys.has('s'),pump=keys.has('Space');
- const lean=(forward?1:0)-(back?1:0);leanPose+=(lean-leanPose)*Math.min(1,dt*7);
- speed=Math.min(520,speed+dt*(forward?10:2));if(back)speed=Math.max(250,speed-dt*42);world+=speed*dt;score=Math.max(score,Math.floor(world/10));cam=Math.max(0,world-W*.31);
- const floor=terrain(world-18);if(!air&&floor!==null){const oldPy=py;py=floor-13+suspension;suspensionVel+=(-suspension*85-suspensionVel*13)*dt;py+=suspensionVel*dt;const look=terrain(world+12),ahead=terrain(world+38);angle=Math.atan2((ahead??floor)-floor,46)*.38-leanPose*.11;if(pump&&ahead!==null&&ahead<floor-15)speed=Math.min(540,speed+dt*32);
-  const bump=rockAt(world+12);if(bump&&bumpTime<=0&&Math.abs(py-(floor-13))<7){bumpTime=.25;suspensionVel-=bump.size*8;vy=-(back?90:forward?145:75);air=true;angle=-.1-leanPose*.2;spin=0;playSound(240,.07)}
-  if(Math.abs(oldPy-py)>1.7)bumpTime=Math.max(bumpTime,.05);}
- const g=gapInfo(Math.max(0,Math.floor((world-500)/700)));if(!air&&floor!==null&&world>=g.start-12&&world<=g.start+17){air=true;vy=forward?-410:back?-290:pump?-385:-332;angle=-.18-leanPose*.2;spin=0;playSound(330,.12)}
- if(air){vy+=(860-(back?130:0)+(forward?80:0))*dt;py+=vy*dt;const tilt=(right?1:0)-(left?1:0);spin+=tilt*dt*3.1;angle+=tilt*dt*2.7-leanPose*dt*2.2;if(pump)vy-=120*dt;
-  const surface=terrain(world+12);if(surface!==null&&vy>0&&py+13>=surface){const trick=Math.floor(Math.abs(spin)*1.5);if(Math.abs(angle)>1.05){crash();return}air=false;py=surface-13;suspension=-7;suspensionVel=0;vy=0;landings++;combo=trick;score+=trick*125+200;toast=trick?`${trick}× STYLE  ·  CLEAN LANDING`:'CLEAN LANDING';toastTime=1.5;playSound(540+trick*70,.17);angle=0;spin=0;}
-  if(py>H+100){crash();return}}
- if(toastTime>0)toastTime-=dt;
-}
+  const left=keys.has('ArrowLeft')||keys.has('a'),right=keys.has('ArrowRight')||keys.has('d'),forward=keys.has('ArrowUp')||keys.has('w'),back=keys.has('ArrowDown')||keys.has('s'),pump=keys.has('Space');
+  const lean=(forward?1:0)-(back?1:0);leanPose+=(lean-leanPose)*Math.min(1,dt*7);
+  speed=Math.min(520,speed+dt*(forward?12:2));if(back)speed=Math.max(250,speed-dt*42);world+=speed*dt;score=Math.max(score,Math.floor(world/10));cam=Math.max(0,world-W*.31);
+  const rearFloor=terrain(world-23),frontFloor=terrain(world+23),floor=terrain(world-18);
+  if(!air&&rearFloor!==null&&frontFloor!==null){
+   const oldPy=py,averageFloor=(rearFloor+frontFloor)*.5;
+   const rearTarget=Math.max(-18,Math.min(8,(averageFloor-rearFloor)*.8));
+   const frontTarget=Math.max(-18,Math.min(8,(averageFloor-frontFloor)*.8));
+   rearSuspensionVel+=(rearTarget-rearSuspension)*105*dt-rearSuspensionVel*14*dt;
+   frontSuspensionVel+=(frontTarget-frontSuspension)*105*dt-frontSuspensionVel*14*dt;
+   rearSuspension+=rearSuspensionVel*dt;frontSuspension+=frontSuspensionVel*dt;
+   suspension=(rearSuspension+frontSuspension)*.5;suspensionVel=(rearSuspensionVel+frontSuspensionVel)*.5;
+   py=averageFloor-13+suspension;
+   angle=Math.atan2(frontFloor-rearFloor,46)*.65-leanPose*.11;
+   const ahead=terrain(world+48);
+   if(pump&&ahead!==null&&ahead<frontFloor-15){speed=Math.min(540,speed+dt*32);rearSuspension-=2.2;frontSuspension-=1.4}
+   const bump=rockAt(world+12);if(bump&&bumpTime<=0&&Math.abs(py-(floor-13))<10){bumpTime=.25;rearSuspensionVel-=bump.size*8;frontSuspensionVel-=bump.size*5;vy=-(back?95:forward?155:80);air=true;angle=-.12-leanPose*.22;spin=0;playSound(240,.07)}
+   if(Math.abs(oldPy-py)>1.7)bumpTime=Math.max(bumpTime,.05);
+  }
+  const gap=gapInfo(Math.max(0,Math.floor((world-500)/700)));
+  if(!air&&floor!==null&&world>=gap.start-12&&world<=gap.start+17){air=true;vy=forward?-430:back?-300:pump?-410:-350;angle=-.18-leanPose*.2;spin=0;rearSuspensionVel=-35;frontSuspensionVel=-45;playSound(330,.12)}
+  const jumpIndex=Math.floor((world-1700)/2600);
+  if(!air&&rearFloor!==null&&frontFloor!==null&&jumpIndex>=0){const dist=world-bigJumpCenter(jumpIndex);if(dist>=-125&&dist< -125+speed*dt){air=true;vy=forward?-510:back?-370:pump?-490:-430;angle=-.2-leanPose*.2;spin=0;rearSuspensionVel=-48;frontSuspensionVel=-58;playSound(390,.16)}}
+  if(air){vy+=(860-(back?130:0)+(forward?80:0))*dt;py+=vy*dt;const tilt=(right?1:0)-(left?1:0);spin+=tilt*dt*5.2;angle+=tilt*dt*4.5-leanPose*dt*2.7;if(pump)vy-=120*dt;
+   const surface=terrain(world+12);if(surface!==null&&vy>0&&py+13>=surface){const trick=Math.floor(Math.abs(spin)*1.5);if(Math.abs(angle)>1.05){crash();return}air=false;py=surface-13;rearSuspension=-9;frontSuspension=-9;rearSuspensionVel=-15;frontSuspensionVel=-15;suspension=-9;suspensionVel=-15;vy=0;landings++;combo=trick;score+=trick*125+200;toast=trick?`${trick}× STYLE  ·  CLEAN LANDING`:'CLEAN LANDING';toastTime=1.5;playSound(540+trick*70,.17);angle=0;spin=0;}
+   if(py>H+100){crash();return}}
+  if(bumpTime>0)bumpTime=Math.max(0,bumpTime-dt);if(toastTime>0)toastTime-=dt;
+ }
 function poly(points,fill){ctx.fillStyle=fill;ctx.beginPath();ctx.moveTo(points[0][0],points[0][1]);for(let i=1;i<points.length;i++)ctx.lineTo(points[i][0],points[i][1]);ctx.closePath();ctx.fill()}
 function rounded(x,y,w,h,r,fill){ctx.fillStyle=fill;ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fill()}
 function drawSky(){const gr=ctx.createLinearGradient(0,0,0,H);gr.addColorStop(0,'#a9b9a2');gr.addColorStop(.42,'#d7cdb0');gr.addColorStop(1,'#e3cfaa');ctx.fillStyle=gr;ctx.fillRect(0,0,W,H);
@@ -64,8 +96,6 @@ function tree(x,base,h,layer,seed){const width=h*(.25+rand(seed+11)*.08),tone=[[
 function drawGround(){const gy=groundY(),start=cam-120,end=cam+W+180;let path=[];const step=10;for(let x=start;x<=end;x+=step){const y=terrain(x);if(y===null){if(path.length>1){poly([...path, [path[path.length-1][0],H+20],[path[0][0],H+20]],'#574536');poly([...path.map(p=>[p[0],p[1]+13]),[path[path.length-1][0],H+20],[path[0][0],H+20]],'#403c30')}path=[];continue}path.push([x-cam,y]);}if(path.length>1){poly([...path,[path[path.length-1][0],H+30],[path[0][0],H+30]],'#71513a');ctx.beginPath();path.forEach((p,i)=>i?ctx.lineTo(...p):ctx.moveTo(...p));ctx.strokeStyle='#c19a67';ctx.lineWidth=5;ctx.stroke();ctx.beginPath();for(let x=start;x<end;x+=28){const y=terrain(x);if(y!==null){ctx.moveTo(x-cam,y+20);ctx.lineTo(x-cam+14,y+20+rand(x)*6)}}ctx.strokeStyle='#5e503b';ctx.lineWidth=2;ctx.stroke()}
  // small rocks to hop
  for(const rock of rocks){const sx=rock.x-cam;if(sx<-30||sx>W+30)continue;const y=terrain(rock.x);if(y===null)continue;ctx.beginPath();ctx.moveTo(sx-rock.size,y);ctx.lineTo(sx-rock.size*.45,y-rock.size*.9);ctx.lineTo(sx+rock.size*.25,y-rock.size*1.2);ctx.lineTo(sx+rock.size,y);ctx.closePath();ctx.fillStyle='#777869';ctx.fill();ctx.strokeStyle='#4d5148';ctx.lineWidth=1;ctx.stroke();}
- // small rocks to hop
- for(const rock of rocks){const sx=rock.x-cam;if(sx<-30||sx>W+30)continue;const y=terrain(rock.x);if(y===null)continue;ctx.beginPath();ctx.moveTo(sx-rock.size,y);ctx.lineTo(sx-rock.size*.45,y-rock.size*.9);ctx.lineTo(sx+rock.size*.25,y-rock.size*1.2);ctx.lineTo(sx+rock.size,y);ctx.closePath();ctx.fillStyle='#777869';ctx.fill();ctx.strokeStyle='#4d5148';ctx.lineWidth=1;ctx.stroke();}
  // ferns at trail edge
  for(let x=Math.floor(start/65)*65;x<end;x+=65){const y=terrain(x);if(y===null)continue;const sx=x-cam;if(sx<-25||sx>W+25)continue;const s=rand(x+4);ctx.strokeStyle=s>.5?'#435b3d':'#586946';ctx.lineWidth=2;for(let k=0;k<5;k++){const a=(k-2)*.34,lh=13+rand(x+k)*17;ctx.beginPath();ctx.moveTo(sx,y+3);ctx.quadraticCurveTo(sx+Math.sin(a)*lh*.5,y-lh*.45,sx+Math.sin(a)*lh,y-lh);ctx.stroke();ctx.beginPath();ctx.ellipse(sx+Math.sin(a)*lh,y-lh,4,8,a,0,Math.PI*2);ctx.fillStyle='#72804d';ctx.fill()}}
  // gap depth subtle mist
@@ -76,10 +106,12 @@ function drawBike(){const x=world-cam,y=py;ctx.save();ctx.translate(x,y);ctx.rot
  if(air){ctx.save();ctx.rotate(-angle);const alt=Math.min(1,Math.max(.15,(groundY()-y)/230));ctx.globalAlpha=.22*(1-alt*.6);ctx.fillStyle='#17251d';ctx.beginPath();ctx.ellipse(6,groundY()-y+12,27+alt*14,5,0,0,Math.PI*2);ctx.fill();ctx.restore()}
  // wheels
  for(const wx of [-wheelbase/2,wheelbase/2]){ctx.beginPath();ctx.arc(wx,0,r,0,Math.PI*2);ctx.fillStyle='#18221f';ctx.fill();ctx.strokeStyle='#d5cfb4';ctx.lineWidth=2;ctx.stroke();ctx.strokeStyle='#89917f';ctx.lineWidth=1;for(let a=0;a<8;a++){const t=a*Math.PI/4;ctx.beginPath();ctx.moveTo(wx,0);ctx.lineTo(wx+Math.cos(t)*(r-2),Math.sin(t)*(r-2));ctx.stroke()}ctx.beginPath();ctx.arc(wx,0,2,0,Math.PI*2);ctx.fillStyle='#c7c1aa';ctx.fill()}
- // frame hardtail
+ // full-suspension frame with independent rear linkage and front fork travel
  const rear=-wheelbase/2,front=wheelbase/2,bb=-2,by=-10,head=13,hy=-19,seat=-13,sy=-24;
- ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#e77845';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(rear,0);ctx.lineTo(bb,by);ctx.lineTo(seat,sy);ctx.lineTo(rear,0);ctx.moveTo(bb,by);ctx.lineTo(head,hy);ctx.lineTo(front,0);ctx.moveTo(head,hy);ctx.lineTo(seat,sy);ctx.stroke();
- ctx.strokeStyle='#242e29';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(seat,sy);ctx.lineTo(seat-8,sy-2);ctx.moveTo(head,hy);ctx.lineTo(head+7,hy-2);ctx.moveTo(head+4,hy-2);ctx.lineTo(head+11,hy-2);ctx.stroke();
+ const rearTravel=Math.max(-5,Math.min(5,rearSuspension*.28)),frontTravel=Math.max(-5,Math.min(5,frontSuspension*.28));
+ ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#e77845';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(bb,by);ctx.lineTo(seat,sy);ctx.lineTo(head,hy);ctx.lineTo(bb,by);ctx.stroke();
+ ctx.strokeStyle='#242e29';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(rear,0);ctx.lineTo(-12,-15+rearTravel);ctx.lineTo(bb,by);ctx.moveTo(-12,-15+rearTravel);ctx.lineTo(seat-3,-20);ctx.moveTo(head,hy);ctx.lineTo(front,frontTravel);ctx.moveTo(seat,sy);ctx.lineTo(seat-8,sy-2);ctx.moveTo(head,hy);ctx.lineTo(head+7,hy-2);ctx.moveTo(head+4,hy-2);ctx.lineTo(head+11,hy-2);ctx.stroke();
+ ctx.strokeStyle='#aab4a1';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-12,-15+rearTravel);ctx.lineTo(-5,-10+rearTravel);ctx.lineTo(bb,by);ctx.moveTo(head+2,hy+2);ctx.lineTo(front-2,frontTravel-2);ctx.stroke();
  // rider torso / limbs
  const lean=spin*.17;ctx.strokeStyle='#253b36';ctx.lineWidth=7;ctx.beginPath();ctx.moveTo(-7,-22);ctx.lineTo(2,-39);ctx.lineTo(17,-32);ctx.stroke();ctx.strokeStyle='#d7bc91';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(2,-38);ctx.lineTo(-8,-27);ctx.lineTo(-16,-17);ctx.moveTo(2,-38);ctx.lineTo(12,-29);ctx.lineTo(17,-23);ctx.stroke();ctx.strokeStyle='#edc48b';ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(-7,-22);ctx.lineTo(-17,-14);ctx.lineTo(-24,-5);ctx.moveTo(-7,-22);ctx.lineTo(2,-15);ctx.lineTo(8,-5);ctx.stroke();
  ctx.fillStyle='#d6dfc2';ctx.beginPath();ctx.ellipse(4+lean*3,-45,9,8,-.25,0,Math.PI*2);ctx.fill();ctx.fillStyle='#d56c43';ctx.beginPath();ctx.ellipse(3+lean*3,-48,10,5,-.15,Math.PI,Math.PI*2);ctx.fill();ctx.fillStyle='#ecbb83';ctx.beginPath();ctx.arc(11,-44,2,0,Math.PI*2);ctx.fill();ctx.restore();
