@@ -14,19 +14,21 @@
 <canvas id="game" aria-label="Fernline endless mountain bike game"></canvas>
 <div class="brand"><div class="brand-mark">✳</div><div class="brand-name">FERNLINE<small>BACKCOUNTRY SESSION № 01</small></div></div>
 <button class="sound" id="sound" aria-label="Toggle sound">♪</button>
-<div class="touch-controls" aria-label="Touch controls"><div class="touch-group"><button data-key="ArrowLeft" aria-label="Lean back">↶</button><button data-key="ArrowRight" aria-label="Lean forward">↷</button></div><div class="touch-group"><button data-key="Space" aria-label="Pump or tuck">↓</button></div></div>
+<div class="touch-controls" aria-label="Touch controls"><div class="touch-group"><button data-key="ArrowDown" aria-label="Lean back">↙</button><button data-key="ArrowUp" aria-label="Lean forward">↗</button></div><div class="touch-group"><button data-key="Space" aria-label="Pump or tuck">↓</button></div></div>
 <script>
 (()=>{
 'use strict';
 const canvas=document.querySelector('#game'),ctx=canvas.getContext('2d');
 let W=innerWidth,H=innerHeight,DPR=1;
 function resize(){DPR=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;canvas.width=Math.round(W*DPR);canvas.height=Math.round(H*DPR);ctx.setTransform(DPR,0,0,DPR,0,0)}addEventListener('resize',resize);resize();
-const keys=new Set();let state='menu',last=0,world=0,cam=0,speed=345,vy=0,py=0,angle=0,spin=0,air=false,crashTimer=0,score=0,best=Number(localStorage.getItem('fernlineBest')||0),landings=0,combo=0,toast='',toastTime=0,mute=false,audio=null;
+const keys=new Set();let state='menu',last=0,world=0,cam=0,speed=345,vy=0,py=0,angle=0,spin=0,air=false,crashTimer=0,score=0,best=Number(localStorage.getItem('fernlineBest')||0),landings=0,combo=0,toast='',toastTime=0,mute=false,audio=null,suspension=0,suspensionVel=0,bumpTime=0,leanPose=0;
+const rocks=Array.from({length:220},(_,i)=>({x:285+i*113+rand(i+40)*66,size:4+rand(i+90)*7,seed:i}));
 const groundY=()=>Math.min(H*.76,Math.max(H*.61,480));
 function rand(n){const x=Math.sin(n*127.1+311.7)*43758.5453;return x-Math.floor(x)}
 function gapInfo(i){const start=500+i*700;return {start,width:150+rand(i+5)*65,lip: start, end:start+150+rand(i+5)*65}}
-function terrain(x){let y=groundY();const idx=Math.max(0,Math.floor((x-500)/700));for(let i=Math.max(0,idx-1);i<=idx+1;i++){const g=gapInfo(i),pre=g.start-105,post=g.end+105;if(x>=pre&&x<g.start){const t=(x-pre)/(g.start-pre);y=groundY()-82*t;}else if(x>=g.start&&x<=g.end)return null;else if(x>g.end&&x<post){const t=(x-g.end)/(post-g.end);y=groundY()-64*(1-t);}}return y}
-function start(){state='play';world=90;cam=0;speed=345;vy=0;py=groundY()-13;angle=0;spin=0;air=false;score=0;landings=0;combo=0;crashTimer=0;last=performance.now();playSound(440,.08);}
+function terrain(x){let y=groundY()+Math.sin(x*.004)*10+Math.sin(x*.013)*4;const idx=Math.max(0,Math.floor((x-500)/700));for(let i=Math.max(0,idx-1);i<=idx+1;i++){const g=gapInfo(i),pre=g.start-105,post=g.end+105;if(x>=pre&&x<g.start){const t=(x-pre)/(g.start-pre);y=groundY()-82*t;}else if(x>=g.start&&x<=g.end)return null;else if(x>g.end&&x<post){const t=(x-g.end)/(post-g.end);y=groundY()-64*(1-t);}}return y}
+function rockAt(x){const i=Math.round((x-285)/113);if(i<0||i>=rocks.length)return null;const rock=rocks[i];return Math.abs(rock.x-x)<rock.size+20?rock:null}
+function start(){state='play';world=90;cam=0;speed=365;vy=0;py=groundY()-13;angle=0;spin=0;air=false;score=0;landings=0;combo=0;crashTimer=0;suspension=0;suspensionVel=0;bumpTime=0;leanPose=0;last=performance.now();playSound(440,.08);}
 function playSound(f,d=.1){if(mute)return;try{audio??=new AudioContext();const o=audio.createOscillator(),g=audio.createGain();o.frequency.value=f;o.type='sine';g.gain.setValueAtTime(.055,audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+d);o.connect(g);g.connect(audio.destination);o.start();o.stop(audio.currentTime+d)}catch{}}
 function crash(){if(state!=='play')return;state='crash';crashTimer=0;combo=0;playSound(115,.3)}
 function activate(){if(state==='menu'||state==='over')start();else if(state==='paused')state='play'}
@@ -36,12 +38,15 @@ for(const b of document.querySelectorAll('[data-key]')){const k=b.dataset.key;b.
 document.querySelector('#sound').onclick=()=>{mute=!mute;document.querySelector('#sound').textContent=mute?'∅':'♪'};
 canvas.addEventListener('pointerdown',e=>{if(state!=='play'){activate();return}if(e.clientY>H*.68)keys.add('Space')});canvas.addEventListener('pointerup',()=>keys.delete('Space'));
 function update(dt){if(state==='crash'){crashTimer+=dt;if(crashTimer>1.3){state='over';if(score>best){best=score;localStorage.setItem('fernlineBest',String(best))}}return}if(state!=='play')return;
- const left=keys.has('ArrowLeft')||keys.has('a'),right=keys.has('ArrowRight')||keys.has('d'),pump=keys.has('Space')||keys.has('ArrowDown')||keys.has('s');
- speed=Math.min(445,speed+dt*2);world+=speed*dt;score=Math.max(score,Math.floor(world/10));cam=Math.max(0,world-W*.31);
- const floor=terrain(world-18);if(!air&&floor!==null){py=floor-13;vy=0;const look=terrain(world+12),ahead=terrain(world+38);angle=Math.atan2((ahead??floor)-floor,46)*.38;if(pump&&ahead!==null&&ahead<floor-15)speed=Math.min(470,speed+dt*32);}
- const g=gapInfo(Math.max(0,Math.floor((world-500)/700)));if(!air&&floor!==null&&world>=g.start-12&&world<=g.start+17){air=true;vy=pump?-385:-332;angle=-.18;spin=0;playSound(330,.12)}
- if(air){vy+=860*dt;py+=vy*dt;const tilt=(right?1:0)-(left?1:0);spin+=tilt*dt*3.1;angle+=tilt*dt*2.7;if(pump)vy-=120*dt;if(!pump&&vy>50)vy+=80*dt;
-  const surface=terrain(world+12);if(surface!==null&&vy>0&&py+13>=surface){const trick=Math.floor(Math.abs(spin)*1.5);if(Math.abs(angle)>1.05){crash();return}air=false;py=surface-13;vy=0;landings++;combo=trick;score+=trick*125+200;toast=trick?`${trick}× STYLE  ·  CLEAN LANDING`:'CLEAN LANDING';toastTime=1.5;playSound(540+trick*70,.17);angle=0;spin=0;}
+ const left=keys.has('ArrowLeft')||keys.has('a'),right=keys.has('ArrowRight')||keys.has('d'),forward=keys.has('ArrowUp')||keys.has('w'),back=keys.has('ArrowDown')||keys.has('s'),pump=keys.has('Space');
+ const lean=(forward?1:0)-(back?1:0);leanPose+=(lean-leanPose)*Math.min(1,dt*7);
+ speed=Math.min(520,speed+dt*(forward?10:2));if(back)speed=Math.max(250,speed-dt*42);world+=speed*dt;score=Math.max(score,Math.floor(world/10));cam=Math.max(0,world-W*.31);
+ const floor=terrain(world-18);if(!air&&floor!==null){const oldPy=py;py=floor-13+suspension;suspensionVel+=(-suspension*85-suspensionVel*13)*dt;py+=suspensionVel*dt;const look=terrain(world+12),ahead=terrain(world+38);angle=Math.atan2((ahead??floor)-floor,46)*.38-leanPose*.11;if(pump&&ahead!==null&&ahead<floor-15)speed=Math.min(540,speed+dt*32);
+  const bump=rockAt(world+12);if(bump&&bumpTime<=0&&Math.abs(py-(floor-13))<7){bumpTime=.25;suspensionVel-=bump.size*8;vy=-(back?90:forward?145:75);air=true;angle=-.1-leanPose*.2;spin=0;playSound(240,.07)}
+  if(Math.abs(oldPy-py)>1.7)bumpTime=Math.max(bumpTime,.05);}
+ const g=gapInfo(Math.max(0,Math.floor((world-500)/700)));if(!air&&floor!==null&&world>=g.start-12&&world<=g.start+17){air=true;vy=forward?-410:back?-290:pump?-385:-332;angle=-.18-leanPose*.2;spin=0;playSound(330,.12)}
+ if(air){vy+=(860-(back?130:0)+(forward?80:0))*dt;py+=vy*dt;const tilt=(right?1:0)-(left?1:0);spin+=tilt*dt*3.1;angle+=tilt*dt*2.7-leanPose*dt*2.2;if(pump)vy-=120*dt;
+  const surface=terrain(world+12);if(surface!==null&&vy>0&&py+13>=surface){const trick=Math.floor(Math.abs(spin)*1.5);if(Math.abs(angle)>1.05){crash();return}air=false;py=surface-13;suspension=-7;suspensionVel=0;vy=0;landings++;combo=trick;score+=trick*125+200;toast=trick?`${trick}× STYLE  ·  CLEAN LANDING`:'CLEAN LANDING';toastTime=1.5;playSound(540+trick*70,.17);angle=0;spin=0;}
   if(py>H+100){crash();return}}
  if(toastTime>0)toastTime-=dt;
 }
@@ -57,6 +62,10 @@ function drawSky(){const gr=ctx.createLinearGradient(0,0,0,H);gr.addColorStop(0,
 }
 function tree(x,base,h,layer,seed){const width=h*(.25+rand(seed+11)*.08),tone=[['#456351','#3c5b4b'],['#355444','#294838'],['#263f35','#20392f']][layer][Math.floor(rand(seed+3)*2)];ctx.fillStyle=tone;ctx.beginPath();ctx.moveTo(x,base-h);ctx.lineTo(x-width*.62,base-h*.49);ctx.lineTo(x-width*.34,base-h*.49);ctx.lineTo(x-width,base-h*.08);ctx.lineTo(x+width,base-h*.08);ctx.lineTo(x+width*.34,base-h*.49);ctx.lineTo(x+width*.62,base-h*.49);ctx.closePath();ctx.fill();ctx.fillStyle='#2e4939';ctx.fillRect(x-3,base-h*.12,6,h*.12)}
 function drawGround(){const gy=groundY(),start=cam-120,end=cam+W+180;let path=[];const step=10;for(let x=start;x<=end;x+=step){const y=terrain(x);if(y===null){if(path.length>1){poly([...path, [path[path.length-1][0],H+20],[path[0][0],H+20]],'#574536');poly([...path.map(p=>[p[0],p[1]+13]),[path[path.length-1][0],H+20],[path[0][0],H+20]],'#403c30')}path=[];continue}path.push([x-cam,y]);}if(path.length>1){poly([...path,[path[path.length-1][0],H+30],[path[0][0],H+30]],'#71513a');ctx.beginPath();path.forEach((p,i)=>i?ctx.lineTo(...p):ctx.moveTo(...p));ctx.strokeStyle='#c19a67';ctx.lineWidth=5;ctx.stroke();ctx.beginPath();for(let x=start;x<end;x+=28){const y=terrain(x);if(y!==null){ctx.moveTo(x-cam,y+20);ctx.lineTo(x-cam+14,y+20+rand(x)*6)}}ctx.strokeStyle='#5e503b';ctx.lineWidth=2;ctx.stroke()}
+ // small rocks to hop
+ for(const rock of rocks){const sx=rock.x-cam;if(sx<-30||sx>W+30)continue;const y=terrain(rock.x);if(y===null)continue;ctx.beginPath();ctx.moveTo(sx-rock.size,y);ctx.lineTo(sx-rock.size*.45,y-rock.size*.9);ctx.lineTo(sx+rock.size*.25,y-rock.size*1.2);ctx.lineTo(sx+rock.size,y);ctx.closePath();ctx.fillStyle='#777869';ctx.fill();ctx.strokeStyle='#4d5148';ctx.lineWidth=1;ctx.stroke();}
+ // small rocks to hop
+ for(const rock of rocks){const sx=rock.x-cam;if(sx<-30||sx>W+30)continue;const y=terrain(rock.x);if(y===null)continue;ctx.beginPath();ctx.moveTo(sx-rock.size,y);ctx.lineTo(sx-rock.size*.45,y-rock.size*.9);ctx.lineTo(sx+rock.size*.25,y-rock.size*1.2);ctx.lineTo(sx+rock.size,y);ctx.closePath();ctx.fillStyle='#777869';ctx.fill();ctx.strokeStyle='#4d5148';ctx.lineWidth=1;ctx.stroke();}
  // ferns at trail edge
  for(let x=Math.floor(start/65)*65;x<end;x+=65){const y=terrain(x);if(y===null)continue;const sx=x-cam;if(sx<-25||sx>W+25)continue;const s=rand(x+4);ctx.strokeStyle=s>.5?'#435b3d':'#586946';ctx.lineWidth=2;for(let k=0;k<5;k++){const a=(k-2)*.34,lh=13+rand(x+k)*17;ctx.beginPath();ctx.moveTo(sx,y+3);ctx.quadraticCurveTo(sx+Math.sin(a)*lh*.5,y-lh*.45,sx+Math.sin(a)*lh,y-lh);ctx.stroke();ctx.beginPath();ctx.ellipse(sx+Math.sin(a)*lh,y-lh,4,8,a,0,Math.PI*2);ctx.fillStyle='#72804d';ctx.fill()}}
  // gap depth subtle mist
